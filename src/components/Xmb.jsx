@@ -5,36 +5,49 @@ import BrandIcon from './BrandIcon.jsx'
 import Clock from './Clock.jsx'
 import WaveBackground, { PALETTE, THEME_NAMES } from './WaveBackground.jsx'
 
-// Switcher cycles: auto (null) -> 0 -> 1 -> ... -> 11 -> auto.
 const nextColor = (c) => (c == null ? 0 : c >= PALETTE.length - 1 ? null : c + 1)
-// A vivid swatch from a palette top-color (the stored tints are dark).
 const swatch = (i) => {
   const [hh, s] = PALETTE[i][0]
   return `hsl(${hh}, ${Math.min(s + 25, 90)}%, 52%)`
 }
 
-const ITEM_H = 100   // px vertical spacing between item rows
-const SWIPE_MIN = 36 // px a touch must travel to count as a swipe (vs a tap)
-// The selected item sits LIST_BELOW px under the category header; already-passed
-// items (index < selected) jump above the header starting at LIST_ABOVE, so the
-// header stays clear between the two groups.
+const ITEM_H = 100
+const SWIPE_MIN = 36
 const LIST_BELOW = 96
 const LIST_ABOVE = -8
 
-// Land on the configured category (fall back to the first column).
+const STATUS_COLORS = {
+  LIVE: '#00ff41',
+  BETA: '#3b82f6',
+  DEMO: '#f59e0b',
+  DEV: '#a855f7',
+  IDEA: '#5a5a7a',
+}
+
 const START_INDEX = Math.max(0, categories.findIndex((c) => c.id === startCategory))
 
 export default function Xmb() {
   const [catIndex, setCatIndex] = useState(START_INDEX)
   const [itemIndices, setItemIndices] = useState(() => categories.map(() => 0))
-  const [opened, setOpened] = useState(null) // item object when detail is open
-  const [colorIndex, setColorIndex] = useState(null) // null = auto-cycle
+  const [opened, setOpened] = useState(null)
+  const [colorIndex, setColorIndex] = useState(categories[START_INDEX].color ?? null)
+  const [hintVisible, setHintVisible] = useState(true)
 
   const itemIndex = itemIndices[catIndex]
   const activeCat = categories[catIndex]
 
+  useEffect(() => {
+    const timer = setTimeout(() => setHintVisible(false), 5000)
+    return () => clearTimeout(timer)
+  }, [])
+
   const moveCat = useCallback((dir) => {
-    setCatIndex((i) => Math.min(categories.length - 1, Math.max(0, i + dir)))
+    setCatIndex((i) => {
+      const next = Math.min(categories.length - 1, Math.max(0, i + dir))
+      const catColor = categories[next].color
+      if (catColor != null) setColorIndex(catColor)
+      return next
+    })
   }, [])
 
   const moveItem = useCallback(
@@ -56,10 +69,24 @@ export default function Xmb() {
     setOpened(categories[catIndex].items[itemIndices[catIndex]])
   }, [catIndex, itemIndices])
 
-  // ── Touch / swipe navigation ──
-  // Swipe left/right moves between categories, up/down between items — the same
-  // axes as the arrow keys. A touch that moves less than SWIPE_MIN is treated as
-  // a tap and left alone so click handlers still open items.
+  // ── Konami code ──
+  const konamiRef = useRef([])
+  const KONAMI_SEQ = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a']
+  useEffect(() => {
+    const onKey = (e) => {
+      konamiRef.current.push(e.key)
+      konamiRef.current = konamiRef.current.slice(-KONAMI_SEQ.length)
+      if (konamiRef.current.length === KONAMI_SEQ.length &&
+          konamiRef.current.every((k, i) => k === KONAMI_SEQ[i])) {
+        setColorIndex(null)
+        konamiRef.current = []
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // ── Touch ──
   const touchRef = useRef(null)
   const onTouchStart = (e) => {
     if (opened) return
@@ -73,8 +100,8 @@ export default function Xmb() {
     const t = e.changedTouches[0]
     const dx = t.clientX - start.x
     const dy = t.clientY - start.y
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN) return // a tap — let it click
-    e.preventDefault() // a real swipe: cancel the click it would otherwise fire
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN) return
+    e.preventDefault()
     if (Math.abs(dx) > Math.abs(dy)) moveCat(dx < 0 ? 1 : -1)
     else moveItem(dy < 0 ? 1 : -1)
   }
@@ -96,6 +123,9 @@ export default function Xmb() {
         case 'ArrowUp': case 'w': e.preventDefault(); moveItem(-1); break
         case 'ArrowDown': case 's': e.preventDefault(); moveItem(1); break
         case 'Enter': case ' ': e.preventDefault(); openItem(); break
+        case 'h':
+          if (e.ctrlKey) { e.preventDefault(); setHintVisible((v) => !v) }
+          break
         default: break
       }
     }
@@ -103,8 +133,6 @@ export default function Xmb() {
     return () => window.removeEventListener('keydown', onKey)
   }, [opened, moveCat, moveItem, openItem])
 
-  // Column width (--slot) and centering origin (--bar-origin) live in CSS so a
-  // single media query retunes the whole bar for phones; keep this in sync.
   const barTransform = `translateX(calc(var(--bar-origin) - ${catIndex} * var(--slot)))`
 
   return (
@@ -121,6 +149,17 @@ export default function Xmb() {
         </div>
       </header>
 
+      {/* Keyboard hint */}
+      <div className={`xmb-hint ${hintVisible ? 'is-visible' : ''}`}>
+        ← → navegar · ↑ ↓ seleccionar · Enter abrir · Ctrl+H ayuda
+      </div>
+
+      {/* Ambient category indicator */}
+      <div className="xmb-ambient">
+        <span className="xmb-ambient-dot" style={{ background: swatch(colorIndex ?? 0) }} />
+        <span className="xmb-ambient-label">{colorIndex != null ? THEME_NAMES[colorIndex] : 'Auto'}</span>
+      </div>
+
       <div className="xmb-cross">
         <div className="xmb-bar" style={{ transform: barTransform }}>
           {categories.map((cat, ci) => {
@@ -129,19 +168,30 @@ export default function Xmb() {
               <div key={cat.id} className={`xmb-col ${active ? 'is-active' : ''}`}>
                 <button
                   className="xmb-cat"
-                  onClick={() => { active ? openItem() : setCatIndex(ci) }}
+                  onClick={() => {
+                    if (active) openItem()
+                    else {
+                      setCatIndex(ci)
+                      if (cat.color != null) setColorIndex(cat.color)
+                    }
+                  }}
                 >
                   <span className="xmb-cat-icon"><Icon name={cat.icon} /></span>
-                  <span className="xmb-cat-label">{cat.label}</span>
+                  <span className="xmb-cat-label">
+                    {cat.label}
+                    <span className="xmb-cat-count">{cat.items.length}</span>
+                  </span>
                 </button>
 
                 {active && (
                   <ul className="xmb-items">
                     {cat.items.map((it, ii) => {
-                      const rel = ii - itemIndex // <0 above header, 0 selected, >0 below
+                      const rel = ii - itemIndex
                       const sel = rel === 0
                       const dist = Math.abs(rel)
                       const y = rel >= 0 ? LIST_BELOW + rel * ITEM_H : LIST_ABOVE + rel * ITEM_H
+                      const delay = Math.abs(rel) * 0.03
+                      const statusColor = STATUS_COLORS[it.status] || null
                       return (
                         <li
                           key={it.id}
@@ -149,6 +199,7 @@ export default function Xmb() {
                           style={{
                             transform: `translateY(${y}px) scale(${sel ? 1.06 : 1})`,
                             opacity: sel ? 1 : Math.max(0.16, 0.66 - dist * 0.16),
+                            transitionDelay: `${delay}s`,
                           }}
                           onClick={() => {
                             if (sel) openItem()
@@ -157,11 +208,18 @@ export default function Xmb() {
                             }
                           }}
                         >
-                          {it.logo && (
-                            <span className="xmb-item-logo"><BrandIcon name={it.logo} /></span>
-                          )}
-                          <span className="xmb-item-title">{it.title}</span>
-                          {it.subtitle && <span className="xmb-item-sub">{it.subtitle}</span>}
+                          <div className="xmb-item-row">
+                            {statusColor && (
+                              <span className="xmb-item-dot" style={{ background: statusColor, boxShadow: `0 0 6px ${statusColor}` }} />
+                            )}
+                            <div className="xmb-item-text">
+                              <span className="xmb-item-title">{it.title}</span>
+                              {it.subtitle && <span className="xmb-item-sub">{it.subtitle}</span>}
+                            </div>
+                            {statusColor && (
+                              <span className="xmb-item-status" style={{ color: statusColor }}>{it.status}</span>
+                            )}
+                          </div>
                         </li>
                       )
                     })}
@@ -199,7 +257,20 @@ export default function Xmb() {
               {opened.title}
             </h2>
             {opened.subtitle && <div className="detail-sub">{opened.subtitle}</div>}
+            {opened.status && STATUS_COLORS[opened.status] && (
+              <div className="detail-status">
+                <span className="detail-status-dot" style={{ background: STATUS_COLORS[opened.status] }} />
+                <span style={{ color: STATUS_COLORS[opened.status], fontWeight: 600 }}>{opened.status}</span>
+              </div>
+            )}
             <p className="detail-body">{opened.body}</p>
+            {opened.tags && opened.tags.length > 0 && (
+              <div className="detail-tags">
+                {opened.tags.map((t) => (
+                  <span key={t} className="detail-tag">{t}</span>
+                ))}
+              </div>
+            )}
             {opened.href && (
               <a className="detail-link" href={opened.href} target="_blank" rel="noopener noreferrer">
                 Open ↗
@@ -208,6 +279,13 @@ export default function Xmb() {
           </div>
         </div>
       )}
+
+      {/* Easter egg: click hint area 5x to unlock auto-cycle */}
+      <div
+        className="xmb-easter-egg"
+        onClick={() => setColorIndex(null)}
+        title="Click para auto-cycle"
+      />
     </div>
   )
 }
